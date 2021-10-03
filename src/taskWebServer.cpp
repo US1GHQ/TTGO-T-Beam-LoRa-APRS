@@ -234,8 +234,8 @@ void handle_Cfg() {
 }
 
 void handle_ReceivedList() {
-  PSRAMJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
-  //DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 500);
+  //PSRAMJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
+  DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 500);
   JsonObject root = doc.to<JsonObject>();
   auto received = root.createNestedArray("received");
   for (auto element: receivedPackets){

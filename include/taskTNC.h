@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <KISS_TO_TNC2.h>
+#include <KISS_TO_PKT.h>
 
 #if defined(ENABLE_BLUETOOTH)
   #include "BluetoothSerial.h"

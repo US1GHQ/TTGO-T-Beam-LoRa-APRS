@@ -45,7 +45,9 @@ bool gpsInitialized = false;
 
   String gpsDataBuffer = "              ";
   for (;;) {
+    #ifdef ENABLE_WIFI
     check_for_new_clients(&gpsServer, gps_clients, MAX_GPS_WIFI_CLIENTS);
+    #endif
     while (gpsSerial.available() > 0) {
       char gpsChar = (char)gpsSerial.read();
       gps.encode(gpsChar);

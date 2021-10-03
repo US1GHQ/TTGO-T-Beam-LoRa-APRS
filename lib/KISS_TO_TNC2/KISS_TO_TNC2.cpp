@@ -4,6 +4,7 @@ bool validateTNC2Frame(const String &tnc2FormattedFrame);
 
 String encode_address_ax25(String tnc2Address);
 String decode_address_ax25(const String &ax25Address, bool &isLast, bool isRelay);
+String decode_path_ax25(const String &ax25Address);
 
 bool validateKISSFrame(const String &kissFormattedFrame);
 
@@ -33,10 +34,16 @@ String decapsulateKISS(const String &frame);
 
  */
 
-String encode_kiss(const String &tnc2FormattedFrame) {
+String encode_kiss(const String &tnc2FormattedFrame, bool &pktFrame) {
   String ax25Frame = "";
 
   if (validateTNC2Frame(tnc2FormattedFrame)) {
+    for (int p = 0; p <= tnc2FormattedFrame.indexOf("WIDE"); p++) { pktFrame = true;}
+    for (int p = 0; p <= tnc2FormattedFrame.indexOf("ECHO"); p++) { pktFrame = true;}
+    for (int p = 0; p <= tnc2FormattedFrame.indexOf("TRACE"); p++) { pktFrame = true;}
+    for (int p = 0; p <= tnc2FormattedFrame.indexOf("RELAY"); p++) { pktFrame = true;}
+    for (int p = 0; p <= tnc2FormattedFrame.indexOf("APRS"); p++) { pktFrame = true;}
+    if (pktFrame) {
     String address = "";
     bool dst_addres_written = false;
     for (int p = 0; p <= tnc2FormattedFrame.indexOf(':'); p++) {
@@ -61,7 +68,7 @@ String encode_kiss(const String &tnc2FormattedFrame) {
     ax25Frame += (char) APRS_INFORMATION_FIELD;
     ax25Frame += tnc2FormattedFrame.substring(tnc2FormattedFrame.indexOf(':') + 1);
   }
-
+}
   String kissFrame = encapsulateKISS(ax25Frame, CMD_DATA);
   return kissFrame;
 }
@@ -113,12 +120,23 @@ String decapsulateKISS(const String &frame) {
  * @param dataFrame
  * @return Decapsulated TNC2KISS APRS data frame, or raw command data frame
  */
-String decode_kiss(const String &inputKISSTNCFrame, bool &dataFrame) {
+String decode_kiss(const String &inputKISSTNCFrame, bool &dataFrame, bool &pktFrame) {
   String TNC2Frame = "";
 
   if (validateKISSFrame(inputKISSTNCFrame)) {
     dataFrame = inputKISSTNCFrame.charAt(1) == CMD_DATA;
-    if (dataFrame){
+    String ax25Frame = decapsulateKISS(inputKISSTNCFrame);
+    String dest_1 = decode_path_ax25(ax25Frame.substring(14, 56));
+    for (int p = 0; p <= dest_1.indexOf("WIDE"); p++) { pktFrame = true;}
+    String dest_2 = decode_path_ax25(ax25Frame.substring(14, 56));
+    for (int p = 0; p <= dest_2.indexOf("ECHO"); p++) { pktFrame = true;}
+    String dest_3 = decode_path_ax25(ax25Frame.substring(14, 56));
+    for (int p = 0; p <= dest_3.indexOf("TRACE"); p++) { pktFrame = true;}
+    String dest_4 = decode_path_ax25(ax25Frame.substring(14, 56));
+    for (int p = 0; p <= dest_4.indexOf("RELAY"); p++) { pktFrame = true;}
+    String dest_5 = decode_path_ax25(ax25Frame.substring(0, 7));
+    for (int p = 0; p <= dest_5.indexOf("APRS"); p++) { pktFrame = true;}
+    if (dataFrame && pktFrame){
       String ax25Frame = decapsulateKISS(inputKISSTNCFrame);
       bool isLast = false;
       String dst_addr = decode_address_ax25(ax25Frame.substring(0, 7), isLast, false);
@@ -137,7 +155,6 @@ String decode_kiss(const String &inputKISSTNCFrame, bool &dataFrame) {
       TNC2Frame += inputKISSTNCFrame;
     }
   }
-
   return TNC2Frame;
 }
 
@@ -201,6 +218,18 @@ String decode_address_ax25(const String &ax25Address, bool &isLast, bool isRelay
   }
   if (isRelay && hasBeenDigipited) {
     TNCAddress += '*';
+  }
+  return TNCAddress;
+}
+
+String decode_path_ax25(const String &ax25Address) {
+  String TNCAddress = "";
+  for (int i = 0; i < 42; ++i) {
+    uint8_t currentCharacter = ax25Address.charAt(i);
+    currentCharacter >>= 1;
+    if (currentCharacter != ' ') {
+      TNCAddress += (char) currentCharacter;
+    }
   }
   return TNCAddress;
 }

@@ -32,14 +32,25 @@
   #include "taskWebServer.h"
 #endif
 
+#ifdef USE_BME280
+    #include <Adafruit_BMP280.h>  // BMP280 Library
+#endif
+
 // oled address
 #define SSD1306_ADDRESS 0x3C
 
 // SPI config
-#define SPI_sck 5
-#define SPI_miso 19
-#define SPI_mosi 27
-#define SPI_ss 18
+#ifdef ESP32_DEV_V1
+  #define SPI_sck 18
+  #define SPI_miso 19
+  #define SPI_mosi 23
+  #define SPI_ss 5
+#else
+  #define SPI_sck 5
+  #define SPI_miso 19
+  #define SPI_mosi 27
+  #define SPI_ss 18
+#endif
 
 // IO config
 #ifdef T_BEAM_V1_0
@@ -54,20 +65,12 @@
   #define BUTTON  39                //pin number for Button on TTGO T-Beam
   #define BUZZER 15                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
-/* Original LORA32 V2.1 Setup
 #elif LORA32_21
-  #define I2C_SDA 4
-  #define I2C_SCL 15
-  #define BUTTON 2                  //pin number for BUTTO
-  #define BUZZER 13                 // enter your buzzer pin gpio
-  const byte TXLED  = 4;            //pin number for LED on TX Tracker
-*/
-#elif LORA32_21                     // Modified as in #47
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
-  const byte TXLED  = 4;            //pin number for LED on TX Tracker
+  const byte TXLED  = 25;            //pin number for LED on TX Tracker
 #elif LORA32_2
   #define I2C_SDA 21
   #define I2C_SCL 22
@@ -85,18 +88,33 @@
   #define I2C_SCL 15 
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
-  const byte TXLED  = 4;            //pin number for LED on TX Tracker
+  const byte TXLED  = 2;            //pin number for LED on TX Tracker
 #elif HELTEC_V2
   #define I2C_SDA 4
   #define I2C_SCL 15    
-  #define BUTTON 2                  //pin number for BUTTO
+  #define BUTTON 0                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
-  const byte TXLED  = 4;            //pin number for LED on TX Tracker
+  const byte TXLED  = 25;           //pin number for LED on TX Tracker
+#elif ESP32_DEV_V1
+  #define I2C_SDA 21
+  #define I2C_SCL 22 
+  #define BUTTON 0                  //pin number for BUTTO
+  #define BUZZER 13
+  const byte TXLED  = 2;             // enter your buzzer pin gpio
+#endif
+
+#ifdef TX_RX_LNA
+  const byte TXPIN  = 17;              //pin number for TX on 1W Modules
+  const byte RXPIN  = 16;              //pin number for RX on 1W Modules
 #endif
 
 // Variables for LoRa settings
-ulong lora_speed = 1200;
-double lora_freq = 433.775;
+#ifdef SPEED_1200
+  ulong lora_speed = 1200;
+#else
+  ulong lora_speed = 300;
+#endif
+double lora_freq = TXFREQ;
 
 // Variables for APRS packaging
 String Tcall;                       //your Call Sign for normal position reports
@@ -152,9 +170,15 @@ String tel_path;
 #else
   boolean enabled_oled = false;
 #endif
+#ifdef USE_BME280
+  boolean enable_bme280 = true;
+#else
+  boolean enable_bme280 = false;
+#endif
 
 // Variables and Constants
 String loraReceivedFrameString = "";      //data on buff is copied to this string
+String loraSendFrameString = "";          //data on buff is copied to this string
 String Outputstring = "";
 String outString="";                      //The new Output String with GPS Conversion RAW
 String LongShown="";
@@ -230,6 +254,16 @@ String infoApAddr = "";
 float average_course[ANGLE_AVGS];
 float avg_c_y, avg_c_x;
 
+//Variables for BME Sensors
+boolean hum_temp = false;
+uint8_t hum_temp_ctr, hum_temp_ctr_max = 3;
+boolean tempsensoravailable=true;
+float hum=0;                 //Stores humidity value
+float temp=99.99;            //Stores temperature value
+float tempf=99.99;           //Stores temperature value
+float pressure=0;            //Stores pressure value in hPa
+int pressure_offset=0;       //Stores offset for pressure correction
+
 uint8_t txPower = TXdbmW;
 
 #ifdef ENABLE_WIFI
@@ -246,10 +280,24 @@ static const adc_unit_t unit = ADC_UNIT_1;
 uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 
 // Singleton instance of the radio driver
-BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
+#ifdef ESP32_DEV_V1
+    BG_RF95 rf95(5, 26);        // For custom ESP32 and LoRa module
+#else
+    BG_RF95 rf95(18, 26);       // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
+#endif
 
 // initialize OLED display
-#define OLED_RESET 16         // not used
+#ifdef TX_RX_LNA
+    #define OLED_RESET 15         // not used
+#else
+    #define OLED_RESET 16
+#endif
+
+//Temp sensor
+#ifdef USE_BME280
+    Adafruit_BMP280 bme;         // if BME is used
+#endif
+
 Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
 
 // + FUNCTIONS-----------------------------------------------------------+//
@@ -323,6 +371,39 @@ void prepareAPRSFrame(){
     outString += aprsSymbolTable;
     outString += aprsLonPreset;
     outString += aprsSymbol;
+#ifdef USE_BME280
+  if(enable_bme280)
+   {
+       // bme.takeForcedMeasurement();
+        tempf = bme.readTemperature()*9/5+29;
+       // hum = bme.readHumidity();
+        pressure = bme.readPressure()/100 + pressure_offset;
+        outString += ".../...t";
+        if (tempf < 0) { // negative Werte erstellen
+        outString += "-";
+        if(tempf>-10) {outString += "0"; }
+        tempf = abs(tempf);
+    } 
+  else 
+    { // positive Werte erstellen
+      if(tempf<100) {outString += "0"; }
+      if(tempf<10) {outString += "0"; }
+    }
+        helper = String(tempf-3,0);
+        helper.trim();
+        outString += helper;
+        outString += "h";
+        if(hum<10) {outString += "0"; }
+        helper = String(hum,0);
+        helper.trim();
+        outString += helper;
+        outString += "b";
+        if(pressure<1000) {outString += "0"; }
+        helper = String(pressure*10,0);
+        helper.trim();
+        outString += helper;
+    }
+  #endif
   }
 
   if(show_cmt){
@@ -374,14 +455,24 @@ void sendpacket(){
  * @param message
  */
 void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
+  #ifdef TX_RX_LNA
+    digitalWrite(TXPIN, HIGH);
+    digitalWrite(RXPIN, LOW);
+  #endif
+
   #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, LOW);
+    digitalWrite(TXLED, HIGH);
   #endif
   lastTX = millis();
 
-  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
-  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
-  if(lora_speed==1200){
+  loraSendFrameString = message;
+  for (int i = 0 ; i < message.length() ; i++) {
+      lora_TXBUFF[i] = (char)loraSendFrameString[i];
+  }
+  if(lora_speed==6000){
+    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
+  }
+  else if(lora_speed==1200){
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
   }
   else if(lora_speed==610){
@@ -401,10 +492,16 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
   }
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
-  rf95.sendAPRS(lora_TXBUFF, messageSize);
+  rf95.sendAPRS(lora_TXBUFF, message.length());
   rf95.waitPacketSent();
+
+  #ifdef TX_RX_LNA
+    digitalWrite(TXPIN, LOW);
+    digitalWrite(RXPIN, HIGH);
+  #endif
+
   #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, HIGH);
+    digitalWrite(TXLED, LOW);
   #endif
 }
 
@@ -555,7 +652,7 @@ String prepareCallsign(const String& callsign){
         String Tcall_message = String(Tcall_message_char);
         // Flash the light when telemetry is being sent
         #ifdef ENABLE_LED_SIGNALING
-          digitalWrite(TXLED, LOW);
+          digitalWrite(TXLED, HIGH);
         #endif
 
         // Determine sequence number (or 'MIC')
@@ -623,6 +720,7 @@ void setup(){
 #endif
 
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
+  bool bme_status;
   Serial.begin(115200);
 
   #ifdef BUZZER
@@ -854,6 +952,10 @@ void setup(){
     average_course[i]=0;
   }
 
+#ifdef TX_RX_LNA
+  pinMode(TXPIN, OUTPUT);
+  pinMode(RXPIN, OUTPUT);
+#endif
   pinMode(TXLED, OUTPUT);
   #ifdef T_BEAM_V1_0
     pinMode(BUTTON, INPUT);
@@ -862,6 +964,12 @@ void setup(){
   #else
     pinMode(BUTTON, INPUT_PULLUP);
   #endif
+
+  #ifdef TX_RX_LNA
+  digitalWrite(TXPIN, LOW);                                                // turn blue LED off
+  digitalWrite(RXPIN, HIGH);                                               // turn blue LED off
+  #endif
+
   digitalWrite(TXLED, LOW);                                               // turn blue LED off
   
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -939,7 +1047,10 @@ void setup(){
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
-  if(lora_speed==1200){
+  if(lora_speed==6000){
+    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
+  }
+  else if(lora_speed==1200){
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
   }
   else if(lora_speed==610){
@@ -974,7 +1085,7 @@ void setup(){
         SerialBT.setPin(BLUETOOTH_PIN);
       #endif
       #ifdef ENABLE_BLUETOOTH
-        SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
+        SerialBT.begin(String("LORA APRS ") + Tcall);
         writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
       #endif
     }
@@ -990,7 +1101,27 @@ void setup(){
   writedisplaytext("","","","","","");
   time_to_refresh = millis() + showRXTime;
   displayInvalidGPS();
-  digitalWrite(TXLED, HIGH);
+
+#ifdef USE_BME280
+      bme_status = bme.begin(0x76);
+      if (!bme_status)
+      {
+        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+        //writedisplaytext("LoRa-APRS","","Init:","BME280 ERROR!","","",3000);
+        tempsensoravailable = false;
+      }
+      pressure_offset = calc_pressure_offset(HEIGTH_PRESET);
+     // bme.takeForcedMeasurement();
+      temp = bme.readTemperature() - 3;  // bme Temperatur auslesen
+     // hum = bme.readHumidity();
+      pressure = bme.readPressure()/100 + pressure_offset;
+#endif
+
+#ifdef TX_RX_LNA
+  digitalWrite(TXPIN, LOW);
+  digitalWrite(RXPIN, HIGH);
+#endif
+  digitalWrite(TXLED, LOW);
 
   // Hold the OLED ON at first boot
   oled_timer=millis()+oled_timeout;
@@ -1137,6 +1268,34 @@ void loop() {
     }
   #endif
 
+  if (hum_temp) 
+  {
+      ++hum_temp_ctr;
+      if (hum_temp_ctr>hum_temp_ctr_max) 
+      {
+        hum_temp_ctr = 0;
+        hum_temp=false;
+      }
+  #ifdef USE_BME280
+      //bme.takeForcedMeasurement();
+      temp = bme.readTemperature() - 3;  // bme Temperatur auslesen
+  #endif
+  }
+  else 
+  {
+    ++hum_temp_ctr;
+    if (hum_temp_ctr>hum_temp_ctr_max) 
+    {
+      hum_temp_ctr = 0;
+      hum_temp=true;
+    }
+      #ifdef USE_BME280
+        //bme.takeForcedMeasurement();
+        //hum = bme.readHumidity();
+        pressure = bme.readPressure()/100 + pressure_offset;
+      #endif
+  }
+
   if (rf95.waitAvailableTimeout(100)) {
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
@@ -1277,4 +1436,16 @@ void loop() {
     #endif
   #endif
   vTaskDelay(1);
+}
+
+int calc_pressure_offset(int height) {
+  //
+  // A very simple method to calculate the offset for correcting the measured air pressure
+  // to the pressure at mean sea level (MSL). It is simplificated to "For each 8m change in height
+  // the pressure is changing by 1hPa."
+  // The exact method is described at
+  // https://de.wikipedia.org/wiki/Barometrische_H%C3%B6henformel#Internationale_H%C3%B6henformel
+  //
+  int offset = round(height / 8);
+  return(offset);
 }
