@@ -222,16 +222,16 @@ String decode_address_ax25(const String &ax25Address, bool &isLast, bool isRelay
   return TNCAddress;
 }
 
-String decode_path_ax25(const String &ax25Address) {
-  String TNCAddress = "";
+String decode_path_ax25(const String &ax25Dest) {
+  String ax25path = "";
   for (int i = 0; i < 42; ++i) {
-    uint8_t currentCharacter = ax25Address.charAt(i);
+    uint8_t currentCharacter = ax25Dest.charAt(i);
     currentCharacter >>= 1;
     if (currentCharacter != ' ') {
-      TNCAddress += (char) currentCharacter;
+      ax25path += (char) currentCharacter;
     }
   }
-  return TNCAddress;
+  return ax25path;
 }
 
 bool validateTNC2Frame(const String &tnc2FormattedFrame) {
