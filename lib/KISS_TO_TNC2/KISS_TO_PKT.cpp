@@ -102,7 +102,6 @@ String decode_kiss_pkt(const String &inputKISSTNCFrame, bool &dataFrame, bool &p
   //END
   if (dataFrame && !pktFrame){
       String ax25Frame = decapsulateKISS_pkt(inputKISSTNCFrame, CMD_DATA);
-      delay(250);
       TNC2Frame += ax25Frame;
     }
   }

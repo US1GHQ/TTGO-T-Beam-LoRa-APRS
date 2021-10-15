@@ -115,6 +115,7 @@
   ulong lora_speed = 300;
 #endif
 double lora_freq = TXFREQ;
+int cad_timeout = 10000;
 
 // Variables for APRS packaging
 String Tcall;                       //your Call Sign for normal position reports
@@ -285,7 +286,7 @@ uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 #else
     BG_RF95 rf95(18, 26);       // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
 #endif
-
+    BG_RF95 setCADTimeout(cad_timeout);
 // initialize OLED display
 #ifdef TX_RX_LNA
     #define OLED_RESET 15         // not used
@@ -469,7 +470,10 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
   for (int i = 0 ; i < message.length() ; i++) {
       lora_TXBUFF[i] = (char)loraSendFrameString[i];
   }
-  if(lora_speed==6000){
+  if(lora_speed==21000){
+    rf95.setModemConfig(BG_RF95::Bw500Cr45Sf128);
+  }
+  else if(lora_speed==6000){
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
@@ -492,6 +496,8 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
   }
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
+  rf95.isChannelActive();
+  rf95.waitCAD();
   rf95.sendAPRS(lora_TXBUFF, message.length());
   rf95.waitPacketSent();
 
@@ -1047,7 +1053,10 @@ void setup(){
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
-  if(lora_speed==6000){
+  if(lora_speed==21000){
+    rf95.setModemConfig(BG_RF95::Bw500Cr45Sf128);
+  }
+  else if(lora_speed==6000){
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
