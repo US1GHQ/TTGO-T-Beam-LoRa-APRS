@@ -8,7 +8,7 @@
 //#include <TTGO_T-Beam_LoRa_APRS_config.h> // to config user parameters
 #include <Arduino.h>
 #include <SPI.h>
-#include <BG_RF95.h>         // library from OE1ACM
+#include <RH_RF95.h>         // library from OE1ACM
 #include <math.h>
 #include <driver/adc.h>
 #include <Wire.h>
@@ -192,8 +192,8 @@ String LatFixed="";
 #endif
 
 //byte arrays
-byte  lora_TXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
-byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
+byte  lora_TXBUFF[RH_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
+byte  lora_RXBUFF[RH_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
@@ -282,11 +282,11 @@ uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 
 // Singleton instance of the radio driver
 #ifdef ESP32_DEV_V1
-    BG_RF95 rf95(5, 26);        // For custom ESP32 and LoRa module
+    RH_RF95 rf95(5, 26);        // For custom ESP32 and LoRa module
 #else
-    BG_RF95 rf95(18, 26);       // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
+    RH_RF95 rf95(18, 26);       // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
 #endif
-    BG_RF95 setCADTimeout(cad_timeout);
+
 // initialize OLED display
 #ifdef TX_RX_LNA
     #define OLED_RESET 15         // not used
@@ -471,33 +471,32 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
       lora_TXBUFF[i] = (char)loraSendFrameString[i];
   }
   if(lora_speed==21000){
-    rf95.setModemConfig(BG_RF95::Bw500Cr45Sf128);
+    rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);
   }
   else if(lora_speed==6000){
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
+    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf512);
   }
   else if(lora_speed==610){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
+    rf95.setModemConfig(RH_RF95::Bw125Cr48Sf1024);
   }
   else if(lora_speed==180){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr48Sf4096);
   }
   else if(lora_speed==210){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf4096);
   }
   else if(lora_speed==240){
-    rf95.setModemConfig(BG_RF95::Bw125Cr46Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr46Sf4096);
   }
   else {
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf4096);
   }
+  rf95.setCADTimeout(cad_timeout);
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
-  rf95.isChannelActive();
-  rf95.waitCAD();
   rf95.sendAPRS(lora_TXBUFF, message.length());
   rf95.waitPacketSent();
 
@@ -1054,32 +1053,33 @@ void setup(){
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
   if(lora_speed==21000){
-    rf95.setModemConfig(BG_RF95::Bw500Cr45Sf128);
+    rf95.setModemConfig(RH_RF95::Bw500Cr45Sf128);
   }
   else if(lora_speed==6000){
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf128);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
+    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf512);
   }
   else if(lora_speed==610){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
+    rf95.setModemConfig(RH_RF95::Bw125Cr48Sf1024);
   }
   else if(lora_speed==180){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr48Sf4096);
   }
   else if(lora_speed==210){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf4096);
   }
   else if(lora_speed==240){
-    rf95.setModemConfig(BG_RF95::Bw125Cr46Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr46Sf4096);
   }
   else {
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf4096);
   }
 
   Serial.printf("LoRa Speed:\t%d\n", lora_speed);
-  
+
+  rf95.setCADTimeout(cad_timeout);
   rf95.setFrequency(lora_freq);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq);
   rf95.setTxPower(txPower);

@@ -3,13 +3,13 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Update.h>
-#include <BG_RF95.h>
+#include <RH_RF95.h>
 #include <esp_wifi.h>
 
 #ifndef TASK_WEBSERVER
 #define TASK_WEBSERVER
 
-extern BG_RF95 rf95;
+extern RH_RF95 rf95;
 #ifdef KISS_PROTOCOL
   extern WiFiServer tncServer;
 #endif
