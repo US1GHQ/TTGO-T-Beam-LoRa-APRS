@@ -622,7 +622,6 @@ void sendToWebList(const String& TNC2FormatedFrame, const int RSSI, const int SN
     receivedPacketData->RSSI = RSSI;
     receivedPacketData->SNR = SNR;
     getLocalTime(&receivedPacketData->rxTime);
-
     if (xQueueSend(webListReceivedQueue, &receivedPacketData, (1000 / portTICK_PERIOD_MS)) != pdPASS){
       // remove buffer on error
       delete receivedPacketData->packet;
@@ -1319,18 +1318,36 @@ void loop() {
       loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
       if (rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength)) {
         loraReceivedFrameString = "";
-        //int rssi = rf95.lastSNR();
+        bool dataFrame = false;                   //is Data Frame or not
+        //Show RSSI & SNR
+        int snr = rf95.lastSNR();
+        int rssi = rf95.lastRssi();
         //Serial.println(rssi);
         enableOled(); // enable OLED
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
+        for (int p = 0; p <= loraReceivedFrameString.indexOf("WIDE"); p++) { dataFrame = true;}
+        for (int p = 0; p <= loraReceivedFrameString.indexOf("APRS"); p++) { dataFrame = true;}
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         #ifdef KISS_PROTOCOL
+        if (dataFrame){
+          #ifdef RSSI_SNR_REPORT
+          sendToTNC(loraReceivedFrameString + ", RSSI:"+ rssi + ", SNR:" + snr);
+          #else
           sendToTNC(loraReceivedFrameString);
+          #endif
+        }
+        else
+        {
+          sendToTNC(loraReceivedFrameString);
+        }
         #endif
         #ifdef ENABLE_WIFI
+        if (dataFrame)
+        {
           sendToWebList(loraReceivedFrameString, rf95.lastRssi(), rf95.lastSNR());
+        }
         #endif
         syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + rf95.lastRssi() + ", SNR: "  + rf95.lastSNR());
       }

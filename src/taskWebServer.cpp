@@ -489,7 +489,6 @@ void handle_saveDeviceCfg(){
 
 
   tReceivedPacketData *receivedPacketData = nullptr;
-
   while (true){
     server.handleClient();
     if (xQueueReceive(webListReceivedQueue, &receivedPacketData, (1 / portTICK_PERIOD_MS)) == pdPASS) {

@@ -1,6 +1,6 @@
 FILENAME_BUILDNO = '.pio/versioning'
 FILENAME_VERSION_H = 'include/version.h'
-version = 'v0.4.4.'
+version = 'v0.4.5.'
 
 import datetime
 from subprocess import *
