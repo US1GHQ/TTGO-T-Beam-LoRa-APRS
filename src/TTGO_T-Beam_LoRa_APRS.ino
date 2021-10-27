@@ -267,6 +267,28 @@ int pressure_offset=0;       //Stores offset for pressure correction
 
 uint8_t txPower = TXdbmW;
 
+boolean rate_limit_message_text = true;		// ratelimit adding messate text (-> saves airtime)
+boolean lora_automatic_cr_adaption = true;	// automatic CR adaption (should be configurable in Web-Interface).
+						// We'll count users (except own digipeated packets), and if we're alone, CR4/8 doesn't disturb anyone.
+						// If we have a high load on the channel, we'll decrease up to CR4/5.
+						// You may set this to off if you are a fixed station / repeater / gateway
+
+#ifdef KISS_PROTOCOL
+bool acceptOwnLocationReportsViaKiss = true;		// may be a web-configurable variable true: Switches of local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
+boolean allow_gps_sleep_while_kiss = true;		// may be a web-configurable variable. If user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
+
+// do not configure
+uint32_t time_last_own_position_via_kiss_received = 0L;	// kiss client sends position report with our call+ssid. Remember when.
+uint32_t time_last_frame_via_kiss_received = 0L;	// kiss client sends aprs-text-messages with our call+ssid. Remember when.
+boolean kiss_client_came_via_bluetooth = false;
+#endif
+
+// do not configure
+boolean dont_send_own_position_packets = false;		// dynamicaly set if kiss device sends position. Maybe there are other usecases (-> kiss-independent)
+boolean gps_state_before_autochange = false;		// remember gps state before autochange
+uint32_t time_last_lora_frame_received = 0L;
+uint32_t time_last_own_text_message_via_kiss_received = 0L;
+
 #ifdef ENABLE_WIFI
   tWebServerCfg webServerCfg;
 #endif
@@ -323,7 +345,7 @@ void prepareAPRSFrame(){
   double Tspeed=0, Tcourse=0;
   uint32_t aprs_lat, aprs_lon;
   int i;
-  int Talt;
+  long Talt;
   Tlat=gps.location.lat();
   Tlon=gps.location.lng();
   Tcourse=gps.course.deg();
@@ -335,11 +357,28 @@ void prepareAPRSFrame(){
   outString = "";
   outString += Tcall;
 
-  if (relay_path.isEmpty()){
-    outString += ">APLO01:!";
-  }else{
-    outString += ">APLO01," + relay_path + ":!";
+  //if (relay_path.isEmpty()){
+  outString += ">APLO02";
+  if (relay_path.length() < 3) {
+    int ssid = relay_path.toInt();
+    if (ssid > 0 && ssid <= /* 15 // no, max hop 3 */ 3) {
+      char buf[4];
+      sprintf(buf, "-%d", ssid);
+      outString += buf;
+    }
+  } else {
+    outString = outString + "," + relay_path;
   }
+  outString += ":";
+  if (
+#ifdef ENABLE_BLUETOOTH
+       SerialBT.hasClient() ||
+#endif
+       ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
+     )
+    outString += "=";
+  else
+    outString += "!";
 
   if(gps_state && gps.location.isValid()){
     outString += aprsSymbolTable;
@@ -359,13 +398,13 @@ void prepareAPRSFrame(){
     outString += "H";
 
     if (showAltitude){
-      Talt = gps.altitude.meters() * 3.28;
-      Altx = Talt;
+      Talt = gps.altitude.feet();
+      char buf[7];
       outString += "/A=";
-      for (i = 0; i < (6 - Altx.length()); ++i){
-        outString += "0";
-      }
-      outString += Talt;
+      if (Talt > 999999) Talt=999999;
+      else if (Talt < -99999) Talt=-99999;
+      sprintf(buf, "%06ld", Talt);
+      outString += buf;
     }
   }else{  //fixed position not compresed
     outString += aprsLatPreset;
@@ -408,12 +447,16 @@ void prepareAPRSFrame(){
   }
 
   if(show_cmt){
+    static uint8_t n;
+    static uint32_t last_sent = 0L;
+    if (!rate_limit_message_text || (n++ % 10) == 0 || (last_sent + sb_max_interval) < millis())
     outString += aprsComment;
+    last_sent = millis();
   }
 
   if(showBattery){
     outString += " Batt=";
-    outString += String(BattVolts, 2);
+    outString += String((BattVolts > 1.0 ? BattVolts : InpVolts), 2);
     outString += ("V");
   }
 
@@ -477,7 +520,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
     rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
-    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf512);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf512);
   }
   else if(lora_speed==610){
     rf95.setModemConfig(RH_RF95::Bw125Cr48Sf1024);
@@ -524,18 +567,23 @@ void batt_read(){
 
 void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3, String Line4, String Line5) {
   batt_read();
-  if (BattVolts < 3.5 && BattVolts > 3.3){
-    #ifdef T_BEAM_V1_0
-      # ifdef ENABLE_LED_SIGNALING
-      axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
+#ifdef notdef
+  if (InpVolts < 1.0) {
+    if (BattVolts < 3.5 && BattVolts > 3.3){
+      #ifdef T_BEAM_V1_0
+        # ifdef ENABLE_LED_SIGNALING
+        axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
+        #endif
       #endif
-    #endif
-  }else if(BattVolts <= 3.3){
-    #ifdef T_BEAM_V1_0
-      axp.setChgLEDMode(AXP20X_LED_OFF);
-      axp.shutdown();
-    #endif
+    } else if (BattVolts <= 3.3) {
+      #ifdef T_BEAM_V1_0
+        axp.setChgLEDMode(AXP20X_LED_OFF);
+        //axp.shutdown(); <-we need fix this 
+        axp.shutdown();
+      #endif
+    }
   }
+  #endif
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(2);
@@ -652,7 +700,7 @@ String prepareCallsign(const String& callsign){
         uint8_t ac_c = (axp.getVbusCurrent()) / 10;
         // Pad telemetry message address to 9 characters
         char Tcall_message_char[9];
-        sprintf_P(Tcall_message_char, "%-9s", Tcall);
+        sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
         String Tcall_message = String(Tcall_message_char);
         // Flash the light when telemetry is being sent
         #ifdef ENABLE_LED_SIGNALING
@@ -884,15 +932,15 @@ void setup(){
 
     if (!preferences.getBool(PREF_APRS_SB_MIN_SPEED_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_MIN_SPEED_PRESET_INIT, true);
-      preferences.putInt(PREF_APRS_SB_MIN_SPEED_PRESET, sb_min_speed);
+      preferences.putInt(PREF_APRS_SB_MIN_SPEED_PRESET, (int ) sb_min_speed);
     }
-    sb_min_speed = preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET);
+    sb_min_speed = (float) preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET);
 
     if (!preferences.getBool(PREF_APRS_SB_MAX_SPEED_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_MAX_SPEED_PRESET_INIT, true);
-      preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, sb_max_speed);
+      preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, (int ) sb_max_speed);
     }
-    sb_max_speed = preferences.getInt(PREF_APRS_SB_MAX_SPEED_PRESET);
+    sb_max_speed = (float) preferences.getInt(PREF_APRS_SB_MAX_SPEED_PRESET);
 
     if (!preferences.getBool(PREF_APRS_SB_ANGLE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_ANGLE_PRESET_INIT, true);
@@ -1058,7 +1106,7 @@ void setup(){
     rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
   }
   else if(lora_speed==1200){
-    rf95.setModemConfig(RH_RF95::Bw125Cr47Sf512);
+    rf95.setModemConfig(RH_RF95::Bw125Cr45Sf512);
   }
   else if(lora_speed==610){
     rf95.setModemConfig(RH_RF95::Bw125Cr48Sf1024);
@@ -1076,7 +1124,7 @@ void setup(){
     rf95.setModemConfig(RH_RF95::Bw125Cr45Sf4096);
   }
 
-  Serial.printf("LoRa Speed:\t%d\n", lora_speed);
+  Serial.printf("LoRa Speed:\t%lu\n", lora_speed);
 
   rf95.setCADTimeout(cad_timeout);
   rf95.setFrequency(lora_freq);
@@ -1232,7 +1280,35 @@ void loop() {
     t_lock = false;
   }
 
-  if (fixed_beacon_enabled) {
+    if (dont_send_own_position_packets) {
+#ifdef KISS_PROTOCOL
+    // reset to default state if kiss device is disconnected, silent or last position frame was seen long time ago (i.e. 1h).
+    if (
+#ifdef ENABLE_BLUETOOTH
+         (kiss_client_came_via_bluetooth && !SerialBT.hasClient()) ||
+#endif
+         (((time_last_own_position_via_kiss_received + sb_max_interval + 10*1000L) < millis()) &&
+             time_last_own_position_via_kiss_received >= time_last_frame_via_kiss_received) ||
+           // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
+	 ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
+            // ^ kiss client sent no positions and stoped sending other data for 2*sb_max_interval (plus 10 seconds grace)
+#ifdef T_BEAM_V1_0
+      if (!gps_state && gps_state_before_autochange)
+        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
+#endif
+      gps_state = gps_state_before_autochange;
+      dont_send_own_position_packets = false;
+      time_last_own_position_via_kiss_received = 0L;
+      time_last_frame_via_kiss_received = 0L;
+#ifdef ENABLE_BLUETOOTH
+      if (kiss_client_came_via_bluetooth && !SerialBT.hasClient())
+        kiss_client_came_via_bluetooth = false;
+#endif
+    }
+#endif
+  }
+  if (fixed_beacon_enabled && !dont_send_own_position_packets) 
+  {
     if (millis() >= next_fixed_beacon && !gps_state) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
@@ -1267,10 +1343,39 @@ void loop() {
     String *TNC2DataFrame = nullptr;
     if (tncToSendQueue) {
       if (xQueueReceive(tncToSendQueue, &TNC2DataFrame, (1 / portTICK_PERIOD_MS)) == pdPASS) {
+        time_last_frame_via_kiss_received = millis();
+        const char *data = TNC2DataFrame->c_str();
+	// Frame comes from same call as ours and is a position report?
+    if (!strncmp(data, Tcall.c_str(), Tcall.length()) && data[Tcall.length()] == '>') {
+	  char *p = strchr(data, ':');
+	  p++;
+	  if (*p == '!' || *p == '=' || *p == '/' || *p == '@' || *p == '[' || *p == '$') {
+        time_last_own_position_via_kiss_received = time_last_frame_via_kiss_received;
+	      if (!acceptOwnLocationReportsViaKiss)
+	      goto out;
+        if (!dont_send_own_position_packets) {
+	      gps_state_before_autochange = gps_state;
+	      if (allow_gps_sleep_while_kiss) {
+#ifdef T_BEAM_V1_0
+	        if (gps_state)
+	          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
+#endif
+	        gps_state = false;
+	      }
+	      dont_send_own_position_packets = true;
+        #ifdef ENABLE_BLUETOOTH
+	      if (SerialBT.hasClient())
+	        kiss_client_came_via_bluetooth = true;
+        #endif
+	    }
+      } else if (*p == ':')
+	    time_last_own_text_message_via_kiss_received = millis();
+        }
         enableOled(); // enable OLED
         writedisplaytext("((KISSTX))","","","","","");
         time_to_refresh = millis() + showRXTime;
         loraSend(txPower, lora_freq, *TNC2DataFrame);
+        out:
         delete TNC2DataFrame;
       }
     }
@@ -1317,6 +1422,7 @@ void loop() {
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
       loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
       if (rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength)) {
+        uint32_t t_now = millis();
         loraReceivedFrameString = "";
         bool dataFrame = false;                   //is Data Frame or not
         //Show RSSI & SNR
@@ -1327,6 +1433,37 @@ void loop() {
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
+const char *received_frame = loraReceivedFrameString.c_str();
+	// CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
+	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
+	  static uint16_t rf_transmissions_heard_in_timeslot = 0;
+	  uint32_t time_measurement_start = 0L;
+
+	  // not our own digipeated call?
+	  if (! (!strcmp(received_frame, Tcall.c_str()) && received_frame[Tcall.length()] == '>')) {
+	    rf_transmissions_heard_in_timeslot++;
+	    // was digipeated? -> there was another rf transmission
+	    char *p = strchr(received_frame, '>');
+	    char *q = strchr(received_frame, ',');
+	    char *r = strchr(received_frame, '*');
+	    if (p && q && r && q > p && r > q && strchr(r, ':') > r)
+	      rf_transmissions_heard_in_timeslot++;
+	    }
+	  if (t_now > (5*60*1000L) && ((time_measurement_start + 5*60*1000L) < t_now)) {
+	    rf_transmissions_heard_in_timeslot /= 2L;
+	    time_measurement_start = t_now - (5*60*1000L/2L);
+	  }
+	  if (rf_transmissions_heard_in_timeslot <= 3 && (time_last_lora_frame_received+40000L) < t_now)
+	    lora_speed = 180;
+	  else if (rf_transmissions_heard_in_timeslot <= 5 && (time_last_lora_frame_received+35000L) < t_now)
+	    lora_speed = 210;
+	  else if (rf_transmissions_heard_in_timeslot <= 6 && (time_last_lora_frame_received+25000L) < t_now)
+	    lora_speed = 210;
+	  else
+	    lora_speed = 300;
+	}
+	  time_last_lora_frame_received = t_now;
+
         for (int p = 0; p <= loraReceivedFrameString.indexOf("WIDE"); p++) { dataFrame = true;}
         for (int p = 0; p <= loraReceivedFrameString.indexOf("APRS"); p++) { dataFrame = true;}
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
@@ -1358,16 +1495,32 @@ void loop() {
       #endif
     #endif
   }
+  // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!allow_gps_sleep_while_kiss' caused gps_state false')
+  if (!dont_send_own_position_packets && !gps_state)
+    goto behind_position_tx;
 
   LatShown = String(gps.location.lat(),5);
   LongShown = String(gps.location.lng(),5);
   average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
   ++point_avg_speed;
+
   if (point_avg_speed>4) {
     point_avg_speed=0;
   }
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
-  nextTX = (sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval;
+  average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
+  ++point_avg_course;
+
+  // not transmitted due to rate limit in previous round? Try again without recomputing nextTX
+  if (nextTX && (nextTX <= ((uint32_t ) (6000000L / lora_speed ))))
+    goto behind_recomputation_of_nextTX;
+
+
+  //nextTX = (sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval;
+  //                                                                             ^^^^^^^^^^^ if we are faxter than sb_max_speed, result is negative. what happens to unsigned long nextTX?! can the assurance if (nextTX > sb_max_interval) work?
+  // next computation could become negative (if we are faster than sb_max_speed). fixes: either work with temporary signed long variable, or test if sb_max_speed < average_speed_final.
+  nextTX = ((sb_max_speed > average_speed_final) ? ((sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval) : sb_min_interval);
+
   if (nextTX < sb_min_interval) {nextTX=sb_min_interval;}
   if (nextTX > sb_max_interval) {nextTX=sb_max_interval;}
   average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
@@ -1404,7 +1557,10 @@ void loop() {
   if ((millis()<sb_max_interval)&&(lastTX == 0)) {
     nextTX = 0;
   }
-  if ( (lastTX+nextTX) <= millis()  ) {
+behind_recomputation_of_nextTX:
+
+  // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
+  if (!dont_send_own_position_packets && ((lastTX+nextTX) < millis()) && ((millis()-lastTX) >= ((uint32_t ) (6000000L / lora_speed )))) {
     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
@@ -1417,12 +1573,15 @@ void loop() {
   }else{
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+String(((lastTX+nextTX)-millis())/1000)+"sec","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+        writedisplaytext(" "+Tcall,"Time to TX: "+(dont_send_own_position_packets ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       } else {
         displayInvalidGPS();
       }
     }
   }
+
+  behind_position_tx:
+
   #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
     if (nextTelemetryFrame < millis()){
       // Schedule the next telemetry frame

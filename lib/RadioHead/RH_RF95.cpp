@@ -29,7 +29,7 @@ PROGMEM static const RH_RF95::ModemConfig MODEM_CONFIG_TABLE[] =
     { 0x74,   0xc7,    0x08}, // Bw125Cr46Sf4096
     { 0x72,   0xc7,    0x08}, // Bw125Cr45Sf4096
     { 0x72,   0xb4,    0x00}, // Bw125Cr45Sf2048 <= M0IGA messup speed
-    { 0x76,   0x94,    0x04}, // Bw125Cr47Sf512 <= corrected 1200baud
+    { 0x72,   0x94,    0x04}, // Bw125Cr45Sf512 <= corrected 1200baud
     { 0x78,   0xa4,    0x00}, // Bw125Cr48Sf1024
 };
 

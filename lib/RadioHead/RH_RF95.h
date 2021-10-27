@@ -611,7 +611,7 @@ public:
 	Bw125Cr46Sf4096,                ///< Bw = 125 kHz, Cr = 4:6, Sf = 4096chips/symbol, CRC on. Slow+long range
 	Bw125Cr45Sf4096,                ///< APRS (BW 125 khz, Cr = 4:5, Sf = 4096chips/symbol, CRC on. Slow+long range
 	Bw125Cr45Sf2048,                ///< M0IGA Messup speed / 698baud (not 1200)
-	Bw125Cr47Sf512,                 ///< corrected 1200 baud
+	Bw125Cr45Sf512,                 ///< corrected 1200 baud
 	Bw125Cr48Sf1024,                /// Bw 125, Cr = 4/8, Sf = 1024chips/symbol, CRC on
     } ModemConfigChoice;
 
